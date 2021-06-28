@@ -2,7 +2,9 @@ import React from "react"
 import { GetServerSideProps } from "next"
 import ReactMarkdown from "react-markdown"
 import Layout from "../../components/Layout"
+import Router from "next/router"
 import { PostProps } from "../../components/Post"
+import { useSession } from "next-auth/client"
 import prisma from "../../lib/prisma"
 
 export const getServerSideProps: GetServerSideProps = async ({ params }) => {
@@ -12,19 +14,45 @@ export const getServerSideProps: GetServerSideProps = async ({ params }) => {
     },
     include: {
       author: {
-        select: { name: true },
+        select: { name: true, email: true },
       },
     },
   })
+
   return {
-    props: post,
+    props: { ...post, host: process.env.HOST },
   }
 }
 
+async function publishPost(id: number, host: string): Promise<void> {
+  await fetch(`${host}/api/publish/${id}`, {
+    method: "PUT",
+  })
+  await Router.push("/")
+}
+
+async function deletePost(id: number, host: string): Promise<void> {
+  await fetch(`${host}/api/post/${id}`, {
+    method: "DELETE",
+  })
+  Router.push("/")
+}
+
 const Post: React.FC<PostProps> = (props) => {
+  const [session, loading] = useSession()
+  if (loading) {
+    return <div>Authenticating ...</div>
+  }
+  const userHasValidSession = Boolean(session)
+  const postBelongsToUser = session?.user?.email === props.author?.email
   let title = props.title
   if (!props.published) {
     title = `${title} (Draft)`
+  }
+
+  const mardownProps = {
+    term: props.content,
+    children: "",
   }
 
   return (
@@ -32,7 +60,17 @@ const Post: React.FC<PostProps> = (props) => {
       <div>
         <h2>{title}</h2>
         <p>By {props?.author?.name || "Unknown author"}</p>
-        <ReactMarkdown source={props.content} />
+        <ReactMarkdown {...mardownProps} />
+        {!props.published && userHasValidSession && postBelongsToUser && (
+          <button onClick={() => publishPost(props.id, props.host)}>
+            Publish
+          </button>
+        )}
+        {userHasValidSession && postBelongsToUser && (
+          <button onClick={() => deletePost(props.id, props.host)}>
+            Delete
+          </button>
+        )}
       </div>
       <style jsx>{`
         .page {
